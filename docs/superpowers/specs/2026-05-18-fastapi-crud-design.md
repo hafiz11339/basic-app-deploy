@@ -48,15 +48,15 @@ A FastAPI application exposing full CRUD for a `Product` resource. Storage is an
 
 ## Storage (`dependencies.py`)
 
-A module-level `dict[int, ProductResponse]` holds all products in memory, keyed by `id`. An `int` counter tracks the next id. A `get_db()` function returns the store and counter as a named tuple, injected via FastAPI `Depends` so routes never access globals directly.
+A module-level `dict[int, dict]` holds all products in memory, keyed by `id`. A module-level `int` counter tracks the next id to assign. `get_db()` returns the dict and is injected via FastAPI `Depends`; the counter is accessed directly from `dependencies.py` by the router (incrementing a mutable counter via `Depends` would require a class-based approach, which is out of scope here).
 
 ```python
 # Conceptual shape
 products_db: dict[int, dict] = {}
 id_counter: int = 1
 
-def get_db() -> tuple[dict, ...]:
-    ...
+def get_db() -> dict[int, dict]:
+    return products_db
 ```
 
 Data does not persist across server restarts — this is by design for this scope.
