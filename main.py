@@ -56,3 +56,9 @@ def delete_product(product_id: int):
     if product_id not in products:
         raise HTTPException(status_code=404, detail="Product not found")
     return products.pop(product_id)
+
+
+
+@app.get("/")
+def health_check():
+    return {"status": "ok"}
