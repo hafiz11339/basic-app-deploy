@@ -7,5 +7,5 @@ variable "app_name" {
 }
 
 variable "github_username" {
-  default = "hafiz11339"    ← your GitHub username
+  default = "hafiz11339"
 }
