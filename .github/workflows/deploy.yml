@@ -38,13 +38,17 @@ jobs:
           tags: ghcr.io/${{ github.repository }}:latest
 
   # Job 2: Run Terraform to provision/update EC2
+  # Outputs the fresh EC2 IP so the redeploy job can SSH into the right host
   deploy:
     name: Terraform Deploy
     runs-on: ubuntu-latest
-    needs: build        # only runs after Docker image is built
+    needs: build
     defaults:
       run:
         working-directory: terraform
+
+    outputs:
+      ec2_host: ${{ steps.tf_output.outputs.ec2_host }}   # 👈 pass IP to next job
 
     steps:
       - name: Checkout code
@@ -54,6 +58,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+          terraform_wrapper: false   # needed so raw output works below
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -68,24 +73,34 @@ jobs:
       - name: Terraform Apply
         run: terraform apply -auto-approve
 
-      - name: Show App URL
+      - name: Capture EC2 IP from Terraform output
+        id: tf_output
         run: |
-          echo "✅ App URL: $(terraform output -raw app_url)"
-          echo "📄 Docs URL: $(terraform output -raw docs_url)"
-        env:
-          TF_VAR_github_username: ${{ github.actor }}
+          EC2_IP=$(terraform output -raw ec2_public_ip)
+          echo "ec2_host=$EC2_IP" >> $GITHUB_OUTPUT
 
-# Job 3: SSH into EC2 and restart the app with latest Docker image
+      - name: Show App URLs
+        run: |
+          echo "✅ App URL:  $(terraform output -raw app_url)"
+          echo "📄 Docs URL: $(terraform output -raw docs_url)"
+
+  # Job 3: SSH into the NEWLY created EC2 and start the app
+  # Runs after deploy so we always have the correct fresh IP
   redeploy:
     name: Redeploy on EC2
     runs-on: ubuntu-latest
-    needs: build       # runs after Docker image is pushed
+    needs: deploy   # 👈 changed from `build` — wait for Terraform to finish first
 
     steps:
+      - name: Wait for EC2 SSH to become available
+        run: |
+          echo "Giving the new instance ~20s to finish booting..."
+          sleep 20
+
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.EC2_HOST }}
+          host: ${{ needs.deploy.outputs.ec2_host }}   # 👈 fresh IP from Terraform
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
@@ -94,12 +109,18 @@ jobs:
 
             # Stop and remove old container if exists
             docker stop fastapi-app || true
-            docker rm fastapi-app || true
+            docker rm   fastapi-app || true
 
-            # Pull latest image and run
+            # Pull the latest image (has your new /flow-check route)
             docker pull ghcr.io/${{ github.repository }}:latest
+
+            # Run with --pull always so Docker never uses a cached layer
             docker run -d \
               --name fastapi-app \
               -p 8000:8000 \
               --restart always \
+              --pull always \
               ghcr.io/${{ github.repository }}:latest
+
+            # Confirm the container is actually running
+            docker ps | grep fastapi-app
