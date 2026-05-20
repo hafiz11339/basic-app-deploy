@@ -67,6 +67,11 @@ jobs:
 
       - name: Terraform Apply
         run: terraform apply -auto-approve
+
+      - name: Show App URL
+        run: |
+          echo "✅ App URL: $(terraform output -raw app_url)"
+          echo "📄 Docs URL: $(terraform output -raw docs_url)"
         env:
           TF_VAR_github_username: ${{ github.actor }}
 
