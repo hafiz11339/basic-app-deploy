@@ -84,9 +84,15 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            docker pull ghcr.io/${{ github.repository }}:latest
+            # Kill whatever is using port 8000
+            sudo fuser -k 8000/tcp || true
+
+            # Stop and remove old container if exists
             docker stop fastapi-app || true
             docker rm fastapi-app || true
+
+            # Pull latest image and run
+            docker pull ghcr.io/${{ github.repository }}:latest
             docker run -d \
               --name fastapi-app \
               -p 8000:8000 \
