@@ -8,6 +8,3 @@ output "docs_url" {
   description = "FastAPI auto-generated docs"
 }
 
-output "ec2_public_ip" {
-  value = aws_instance.app.public_ip
-}
