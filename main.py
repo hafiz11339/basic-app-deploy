@@ -67,3 +67,9 @@ def delete_product(product_id: int):
 @app.get("/")
 def health_check():
     return {"status": "ok"}
+
+
+
+@app.get("/flow-check")
+def flow_check():
+    return {"flow": "ok"}
