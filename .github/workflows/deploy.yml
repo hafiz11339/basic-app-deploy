@@ -2,7 +2,7 @@ name: Build & Deploy FastAPI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 env:
   TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
