@@ -64,6 +64,7 @@ resource "aws_instance" "app" {
   )
 
   tags = {
-    Name = var.app_name
+    Name    = var.app_name
+    ManagedBy = "github-actions"
   }
 }
