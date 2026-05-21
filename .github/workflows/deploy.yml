@@ -153,16 +153,34 @@ jobs:
       - name: Get EC2 public IP from AWS
         id: ec2_ip
         run: |
-          EC2_IP=$(aws ec2 describe-instances \
+          # Find instance by tag regardless of state
+          INSTANCE_ID=$(aws ec2 describe-instances \
             --filters \
               "Name=tag:Name,Values=fastapi-app" \
-              "Name=instance-state-name,Values=running" \
-            --query "Reservations[0].Instances[0].PublicIpAddress" \
+              "Name=instance-state-name,Values=running,stopped" \
+            --query "Reservations[0].Instances[0].InstanceId" \
             --output text)
-          if [ -z "$EC2_IP" ] || [ "$EC2_IP" = "None" ]; then
-            echo "ERROR: No running EC2 instance found with tag Name=fastapi-app"
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
+            echo "ERROR: No EC2 instance found with tag Name=fastapi-app"
             exit 1
           fi
+
+          # Start the instance if it is stopped
+          STATE=$(aws ec2 describe-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --query "Reservations[0].Instances[0].State.Name" \
+            --output text)
+          if [ "$STATE" = "stopped" ]; then
+            echo "Instance $INSTANCE_ID is stopped — starting it..."
+            aws ec2 start-instances --instance-ids "$INSTANCE_ID"
+            aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+            echo "Instance is now running."
+          fi
+
+          EC2_IP=$(aws ec2 describe-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --query "Reservations[0].Instances[0].PublicIpAddress" \
+            --output text)
           echo "ec2_ip=$EC2_IP" >> $GITHUB_OUTPUT
           echo "Deploying to EC2: $EC2_IP"
 
