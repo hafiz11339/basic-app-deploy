@@ -133,8 +133,8 @@ jobs:
             docker ps | grep fastapi-app
             echo "Deployed to fresh EC2 successfully"
 
-  # Job 4: Normal code push — look up the running EC2 by tag and redeploy
-  # No stored EC2_HOST secret needed — AWS CLI finds the instance dynamically
+  # Job 4: Normal code push — look up the running EC2 by tag and redeploy.
+  # If the instance is gone, automatically provisions a new one via Terraform.
   redeploy:
     name: Redeploy on Existing EC2
     runs-on: ubuntu-latest
@@ -143,6 +143,9 @@ jobs:
     if: needs.check-changes.outputs.terraform == 'false'
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -153,41 +156,80 @@ jobs:
       - name: Get EC2 public IP from AWS
         id: ec2_ip
         run: |
-          # Find instance by tag regardless of state
+          # Find instance by tag regardless of state (running or stopped)
           INSTANCE_ID=$(aws ec2 describe-instances \
             --filters \
               "Name=tag:Name,Values=fastapi-app" \
               "Name=instance-state-name,Values=running,stopped" \
             --query "Reservations[0].Instances[0].InstanceId" \
             --output text)
+
           if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
-            echo "ERROR: No EC2 instance found with tag Name=fastapi-app"
-            exit 1
+            echo "No existing instance found — will provision a new one via Terraform."
+            echo "ec2_ip=" >> $GITHUB_OUTPUT
+            echo "needs_terraform=true" >> $GITHUB_OUTPUT
+          else
+            # Start the instance if it is stopped
+            STATE=$(aws ec2 describe-instances \
+              --instance-ids "$INSTANCE_ID" \
+              --query "Reservations[0].Instances[0].State.Name" \
+              --output text)
+            if [ "$STATE" = "stopped" ]; then
+              echo "Instance $INSTANCE_ID is stopped — starting it..."
+              aws ec2 start-instances --instance-ids "$INSTANCE_ID"
+              aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+              echo "Instance is now running."
+            fi
+
+            EC2_IP=$(aws ec2 describe-instances \
+              --instance-ids "$INSTANCE_ID" \
+              --query "Reservations[0].Instances[0].PublicIpAddress" \
+              --output text)
+            echo "ec2_ip=$EC2_IP" >> $GITHUB_OUTPUT
+            echo "needs_terraform=false" >> $GITHUB_OUTPUT
+            echo "Found existing EC2: $EC2_IP"
           fi
 
-          # Start the instance if it is stopped
-          STATE=$(aws ec2 describe-instances \
-            --instance-ids "$INSTANCE_ID" \
-            --query "Reservations[0].Instances[0].State.Name" \
-            --output text)
-          if [ "$STATE" = "stopped" ]; then
-            echo "Instance $INSTANCE_ID is stopped — starting it..."
-            aws ec2 start-instances --instance-ids "$INSTANCE_ID"
-            aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
-            echo "Instance is now running."
-          fi
+      # --- Terraform fallback: only runs when no instance was found ---
+      - name: Setup Terraform
+        if: steps.ec2_ip.outputs.needs_terraform == 'true'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+          terraform_wrapper: false
 
-          EC2_IP=$(aws ec2 describe-instances \
-            --instance-ids "$INSTANCE_ID" \
-            --query "Reservations[0].Instances[0].PublicIpAddress" \
-            --output text)
+      - name: Terraform Init
+        if: steps.ec2_ip.outputs.needs_terraform == 'true'
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Apply (provision new EC2)
+        if: steps.ec2_ip.outputs.needs_terraform == 'true'
+        working-directory: terraform
+        env:
+          TF_VAR_deploy_public_key: ${{ secrets.DEPLOY_PUBLIC_KEY }}
+        run: terraform apply -auto-approve
+
+      - name: Capture new EC2 IP from Terraform
+        if: steps.ec2_ip.outputs.needs_terraform == 'true'
+        id: tf_ip
+        working-directory: terraform
+        run: |
+          EC2_IP=$(terraform output -raw app_url | sed 's|http://||' | sed 's|:8000||')
           echo "ec2_ip=$EC2_IP" >> $GITHUB_OUTPUT
-          echo "Deploying to EC2: $EC2_IP"
+          echo "Provisioned new EC2: $EC2_IP"
 
-      - name: Deploy latest image to existing EC2
+      - name: Wait for new EC2 to boot
+        if: steps.ec2_ip.outputs.needs_terraform == 'true'
+        run: |
+          echo "Waiting 180 seconds for EC2 to boot and Docker to install..."
+          sleep 180
+
+      # --- Deploy: picks the IP from whichever source is available ---
+      - name: Deploy latest image to EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ steps.ec2_ip.outputs.ec2_ip }}
+          host: ${{ steps.ec2_ip.outputs.ec2_ip || steps.tf_ip.outputs.ec2_ip }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
