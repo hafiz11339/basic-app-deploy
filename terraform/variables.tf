@@ -13,3 +13,8 @@ variable "app_name" {
 variable "github_username" {
   default = "hafiz11339"
 }
+
+
+variable "deploy_public_key" {
+  description = "Public SSH key for GitHub Actions"
+}
