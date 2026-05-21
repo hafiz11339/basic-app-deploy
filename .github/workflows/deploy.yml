@@ -36,21 +36,40 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository }}:latest
 
-  # Job 2: Terraform — only when terraform/ files change
+  # Job 2: Detect whether terraform/ files changed in this push
+  check-changes:
+    name: Detect Changed Files
+    runs-on: ubuntu-latest
+    outputs:
+      terraform: ${{ steps.detect.outputs.terraform }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check for terraform changes
+        id: detect
+        run: |
+          if git diff --name-only HEAD~1 HEAD | grep -q '^terraform/'; then
+            echo "terraform=true" >> $GITHUB_OUTPUT
+          else
+            echo "terraform=false" >> $GITHUB_OUTPUT
+          fi
+
+  # Job 3: Terraform — only when terraform/ files change
   # Creates new EC2, captures its IP, updates GitHub secret, then deploys
   deploy:
     name: Terraform Deploy (infra changes only)
     runs-on: ubuntu-latest
-    needs: build        # waits for Job 1 to finish first
+    needs: [build, check-changes]
     permissions:
       contents: write   # needed to update GitHub secret
     defaults:
       run:
         working-directory: terraform
 
-    if: |
-      contains(join(github.event.commits.*.modified, ','), 'terraform/') ||
-      contains(join(github.event.commits.*.added, ','), 'terraform/')
+    if: needs.check-changes.outputs.terraform == 'true'
 
     outputs:
       ec2_host: ${{ steps.tf_output.outputs.ec2_host }}
@@ -99,11 +118,11 @@ jobs:
           echo "App URL:  $(terraform output -raw app_url)"
           echo "Docs URL: $(terraform output -raw docs_url)"
 
-      # Wait for EC2 to fully boot before deploying
+      # Wait for EC2 to fully boot and Docker to finish installing (apt-get takes 2-4 min)
       - name: Wait for EC2 to boot
         run: |
-          echo "Waiting 60 seconds for EC2 to boot..."
-          sleep 60
+          echo "Waiting 180 seconds for EC2 to boot and Docker to install..."
+          sleep 180
 
       # Deploy to the brand new EC2 using the fresh IP
       - name: Deploy to fresh EC2
@@ -113,7 +132,6 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            sudo fuser -k 8000/tcp || true
             docker stop fastapi-app || true
             docker rm fastapi-app || true
             docker pull ghcr.io/${{ github.repository }}:latest
@@ -125,16 +143,14 @@ jobs:
             docker ps | grep fastapi-app
             echo "Deployed to fresh EC2 successfully"
 
-  # Job 3: Normal code push — SSH into existing EC2 and redeploy
-  # EC2_HOST secret is always up to date thanks to Job 2 above
+  # Job 4: Normal code push — SSH into existing EC2 and redeploy
+  # EC2_HOST secret is always up to date thanks to Job 3 above
   redeploy:
     name: Redeploy on Existing EC2
     runs-on: ubuntu-latest
-    needs: build        # waits for Job 1 to finish first
+    needs: [build, check-changes]
 
-    if: |
-      !contains(join(github.event.commits.*.modified, ','), 'terraform/') &&
-      !contains(join(github.event.commits.*.added, ','), 'terraform/')
+    if: needs.check-changes.outputs.terraform == 'false'
 
     steps:
       - name: Deploy latest image to existing EC2
