@@ -47,6 +47,7 @@ resource "aws_instance" "app" {
 
   user_data = base64encode(<<-EOF
     #!/bin/bash
+    set -e
     # Install Docker
     apt-get update -y
     apt-get install -y docker.io
@@ -54,9 +55,9 @@ resource "aws_instance" "app" {
     systemctl enable docker
     usermod -aG docker ubuntu
 
-    # Add GitHub Actions deploy key automatically
+    # Add GitHub Actions deploy key
     mkdir -p /home/ubuntu/.ssh
-    echo "${var.deploy_public_key}" >> /home/ubuntu/.ssh/authorized_keys
+    echo "${var.deploy_public_key}" > /home/ubuntu/.ssh/authorized_keys
     chmod 700 /home/ubuntu/.ssh
     chmod 600 /home/ubuntu/.ssh/authorized_keys
     chown -R ubuntu:ubuntu /home/ubuntu/.ssh
