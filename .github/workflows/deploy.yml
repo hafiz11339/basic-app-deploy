@@ -106,10 +106,10 @@ jobs:
           echo "New EC2 IP: $EC2_IP"
 
       # Automatically update the EC2_HOST secret with the new IP
-      # So future code-only pushes always go to the correct machine
+      # Requires GH_PAT secret (PAT with repo scope) — GITHUB_TOKEN can't manage secrets
       - name: Update EC2_HOST secret with new IP
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           gh secret set EC2_HOST --body "${{ steps.tf_output.outputs.ec2_host }}" --repo ${{ github.repository }}
 
