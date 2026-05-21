@@ -73,3 +73,9 @@ def health_check():
 @app.get("/flow-check")
 def flow_check():
     return {"flow": "ok"}
+
+
+
+@app.get("/new-endpoint")
+def new_endpoint():
+    return {"data": True}
