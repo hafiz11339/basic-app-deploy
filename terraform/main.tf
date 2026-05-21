@@ -42,7 +42,7 @@ resource "aws_security_group" "app_sg" {
 
 resource "aws_instance" "app" {
   ami                    = data.aws_ami.ubuntu.id
-  instance_type          = "t3.micro"
+  instance_type          = var.instance_type
   vpc_security_group_ids = [aws_security_group.app_sg.id]
 
   # This script runs on first boot — installs Docker only.
