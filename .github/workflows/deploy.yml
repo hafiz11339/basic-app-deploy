@@ -93,7 +93,9 @@ jobs:
         run: terraform init
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve -var="deploy_public_key=${{ secrets.DEPLOY_PUBLIC_KEY }}"
+        env:
+          TF_VAR_deploy_public_key: ${{ secrets.DEPLOY_PUBLIC_KEY }}
+        run: terraform apply -auto-approve
 
       - name: Capture EC2 IP
         id: tf_output
