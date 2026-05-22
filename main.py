@@ -79,3 +79,10 @@ def flow_check():
 @app.get("/new-endpoint")
 def new_endpoint():
     return {"data": True}
+
+
+
+
+@app.get("/test-new-endpoint")
+def test_new_endpoint():
+    return {"data": False}
